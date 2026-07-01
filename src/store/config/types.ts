@@ -83,6 +83,7 @@ export interface AfcConfig {
   showLaneInfinite: boolean;
   showUnitIcons: boolean;
   showTd1Color: boolean;
+  laneCardView: boolean;
 }
 
 export interface HostConfig {

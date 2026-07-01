@@ -19,6 +19,17 @@
     </template>
 
     <v-list dense>
+      <v-list-item @click="laneCardView = !laneCardView">
+        <v-list-item-action class="my-0">
+          <v-checkbox :input-value="laneCardView" />
+        </v-list-item-action>
+        <v-list-item-content>
+          <v-list-item-title>
+            {{ $t('app.afc.LaneCard.lane_card_view') }}
+          </v-list-item-title>
+        </v-list-item-content>
+      </v-list-item>
+
       <v-list-item @click="showFilamentName = !showFilamentName">
         <v-list-item-action class="my-0">
           <v-checkbox :input-value="showFilamentName" />
@@ -96,6 +107,18 @@ import AfcCardSettingsUnit from '@/components/widgets/afc/AfcCardSettingsUnit.vu
   }
 })
 export default class AfcCardSettings extends Mixins(StateMixin, AfcMixin) {
+  get laneCardView (): boolean {
+    return this.$typedState.config.uiSettings.afc.laneCardView
+  }
+
+  set laneCardView (value: boolean) {
+    this.$typedDispatch('config/saveByPath', {
+      path: 'uiSettings.afc.laneCardView',
+      value,
+      server: true
+    })
+  }
+
   get showFilamentName (): boolean {
     return this.afcShowFilamentName
   }

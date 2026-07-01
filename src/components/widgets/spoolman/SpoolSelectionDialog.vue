@@ -121,6 +121,20 @@
             :is-selected="item.id === selectedSpoolId"
             @click.prevent="selectedSpoolId = selectedSpoolId === item.id ? null : item.id"
           >
+            <template #[`item.select`]>
+              <v-radio-group
+                :value="selectedSpoolId"
+                class="ma-0 pa-0 d-inline-flex"
+                hide-details
+              >
+                <v-radio
+                  :value="item.id"
+                  :ripple="false"
+                  @click.stop="selectedSpoolId = selectedSpoolId === item.id ? null : item.id"
+                />
+              </v-radio-group>
+            </template>
+
             <template #[`item.filament_name`]>
               <div class="d-flex my-1">
                 <v-progress-circular
@@ -136,7 +150,7 @@
                     size="42"
                     class="spool-icon"
                   >
-                    {{ item.id === selectedSpoolId ? '$markedCircle' : '$filament' }}
+                    $filament
                   </v-icon>
                 </v-progress-circular>
 
@@ -533,6 +547,15 @@ export default class SpoolSelectionDialog extends Mixins(StateMixin, BrowserMixi
   get headers (): DataTableHeader[] {
     return [
       {
+        text: '',
+        value: 'select',
+        sortable: false,
+        align: 'center',
+        width: 56,
+        class: 'pe-0',
+        cellClass: 'pe-0'
+      },
+      {
         text: this.$tc('app.spoolman.label.filament_name'),
         value: 'filament_name'
       },
@@ -796,5 +819,22 @@ export default class SpoolSelectionDialog extends Mixins(StateMixin, BrowserMixi
     flex-direction: column;
     overflow: auto;
     height: 100%;
+  }
+
+  // Make the whole row read as clickable and the selection clearly visible
+  .spool-table :deep(tbody tr) {
+    cursor: pointer;
+  }
+
+  .spool-table :deep(tbody tr:hover > td) {
+    background-color: rgba(128, 128, 128, 0.08);
+  }
+
+  .spool-table :deep(tbody tr.v-data-table__selected > td) {
+    background-color: rgba(128, 128, 128, 0.18);
+  }
+
+  .spool-table :deep(tbody tr.v-data-table__selected > td:first-child) {
+    box-shadow: inset 4px 0 0 0 var(--v-primary-base);
   }
 </style>

@@ -64,6 +64,19 @@ export default class AfcMixin extends Vue {
     return this.afc?.current_state ?? 'Idle'
   }
 
+  get afcNextLane (): string | null {
+    const next = this.afc?.next_lane
+    return next && next !== 'NONE' ? next : null
+  }
+
+  get afcNumberOfToolchanges (): number {
+    return this.afc?.number_of_toolchanges ?? 0
+  }
+
+  get afcCurrentToolchange (): number {
+    return this.afc?.current_toolchange ?? 0
+  }
+
   get afcExistsSpoolman (): boolean {
     return this.$typedGetters['server/componentSupport']('spoolman')
   }
