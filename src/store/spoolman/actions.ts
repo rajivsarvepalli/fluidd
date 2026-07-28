@@ -14,14 +14,43 @@ import { gte, valid } from 'semver'
 
 const logPrefix = '[SPOOLMAN]'
 
-const payloadAsSpoolmanProxyResponseV2 = <T>(payload: Moonraker.Spoolman.ProxyResponse<T>): Moonraker.Spoolman.ProxyResponseV2<T> => {
+// Retry the initial fetch when Spoolman is unreachable at connect time, since
+// Moonraker only notifies us on a status transition.
+const AVAILABLE_SPOOLS_RETRY_DELAY = 5000
+const AVAILABLE_SPOOLS_MAX_RETRIES = 12
+let availableSpoolsRetryTimer: ReturnType<typeof setTimeout> | null = null
+let availableSpoolsRetryCount = 0
+
+const clearAvailableSpoolsRetry = () => {
+  if (availableSpoolsRetryTimer != null) {
+    clearTimeout(availableSpoolsRetryTimer)
+    availableSpoolsRetryTimer = null
+  }
+  availableSpoolsRetryCount = 0
+}
+
+const scheduleAvailableSpoolsRetry = () => {
+  if (availableSpoolsRetryCount >= AVAILABLE_SPOOLS_MAX_RETRIES) return
+  availableSpoolsRetryCount++
+  availableSpoolsRetryTimer = setTimeout(fetchAvailableSpools, AVAILABLE_SPOOLS_RETRY_DELAY)
+}
+
+const fetchAvailableSpools = () => {
+  // Moonraker rejects the proxy request outright (JSON-RPC error) when its
+  // spoolman component isn't ready yet — that path never dispatches
+  // onAvailableSpools, so the retry has to hang off the rejection as well.
+  SocketActions.serverSpoolmanProxyGetAvailableSpools()
+    .catch(() => scheduleAvailableSpoolsRetry())
+}
+
+const payloadAsSpoolmanProxyResponseV2 = <T>(payload: Moonraker.Spoolman.ProxyResponse<T>, emitError = true): Moonraker.Spoolman.ProxyResponseV2<T> => {
   if (
     payload != null &&
     typeof payload === 'object' &&
     'error' in payload &&
     'response' in payload
   ) {
-    if (payload.error != null) {
+    if (payload.error != null && emitError) {
       EventBus.$emit(typeof payload.error === 'string' ? payload.error : payload.error.message, { type: 'error' })
     }
 
@@ -54,6 +83,7 @@ export const actions = {
    * Reset our store
    */
   async reset ({ commit }) {
+    clearAvailableSpoolsRetry()
     commit('setReset')
   },
 
@@ -61,8 +91,9 @@ export const actions = {
    * Make a socket request to init the spoolman component.
    */
   async init () {
+    clearAvailableSpoolsRetry()
     SocketActions.serverSpoolmanGetSpoolId()
-    SocketActions.serverSpoolmanProxyGetAvailableSpools()
+    fetchAvailableSpools()
     SocketActions.serverSpoolmanProxyGetInfo()
   },
 
@@ -146,6 +177,8 @@ export const actions = {
   },
 
   async onStatusChanged ({ commit, dispatch }, payload: boolean) {
+    clearAvailableSpoolsRetry()
+
     if (payload) {
       // refresh data, connected state will be set on data retrieval
       dispatch('init')
@@ -155,11 +188,16 @@ export const actions = {
   },
 
   async onAvailableSpools ({ commit, dispatch }, payload: Moonraker.Spoolman.ProxyResponse<Moonraker.Spoolman.Spool[]>) {
-    payload = payloadAsSpoolmanProxyResponseV2(payload)
+    // Only toast the first failure; retries stay quiet.
+    const isFirstAttempt = availableSpoolsRetryCount === 0
+    payload = payloadAsSpoolmanProxyResponseV2(payload, isFirstAttempt)
 
     if (payload.error != null) {
+      scheduleAvailableSpoolsRetry()
       return
     }
+
+    clearAvailableSpoolsRetry()
 
     commit('setSpools', payload.response)
 

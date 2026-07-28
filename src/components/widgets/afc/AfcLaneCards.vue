@@ -1,5 +1,26 @@
 <template>
   <div class="afc-lane-cards-wrapper">
+    <!-- Toolbar -->
+    <div
+      v-if="hasAnyLanes"
+      class="afc-lane-cards-toolbar"
+    >
+      <v-spacer />
+      <v-btn
+        small
+        text
+        @click="openFilaments()"
+      >
+        <v-icon
+          small
+          left
+        >
+          $mmuEditGateMap
+        </v-icon>
+        {{ $t('app.afc.LaneCard.edit_filaments') }}
+      </v-btn>
+    </div>
+
     <!-- Loading skeletons (klippy not ready yet) -->
     <div
       v-if="!hasAnyLanes && !klippyReady"
@@ -47,6 +68,7 @@
           v-for="lane in unitLanes(unit)"
           :key="`lane-${lane}`"
           :name="lane"
+          @edit-filament="onEditFilament"
         />
       </div>
     </template>
@@ -141,6 +163,11 @@
         {{ $t('app.afc.EjectFilament') }}
       </v-btn>
     </div>
+
+    <afc-lane-filaments-dialog
+      v-model="showFilaments"
+      :focus-lane="filamentsFocusLane"
+    />
   </div>
 </template>
 
@@ -149,8 +176,9 @@ import { Component, Mixins } from 'vue-property-decorator'
 import StateMixin from '@/mixins/state'
 import AfcMixin from '@/mixins/afc'
 import { encodeGcodeParamValue } from '@/util/gcode-helpers'
-import { buildEndlessSpoolChains } from '@/util/afc-helpers'
+import { buildEndlessSpoolChains, afcResolveLaneColor } from '@/util/afc-helpers'
 import AfcLaneCard from '@/components/widgets/afc/AfcLaneCard.vue'
+import AfcLaneFilamentsDialog from '@/components/widgets/afc/dialogs/AfcLaneFilamentsDialog.vue'
 
 interface ChainLane {
   name: string
@@ -164,9 +192,22 @@ interface EndlessChain {
 }
 
 @Component({
-  components: { AfcLaneCard },
+  components: { AfcLaneCard, AfcLaneFilamentsDialog },
 })
 export default class AfcLaneCards extends Mixins(StateMixin, AfcMixin) {
+  showFilaments = false
+  filamentsFocusLane: string | null = null
+
+  onEditFilament (name: string) {
+    this.filamentsFocusLane = name
+    this.showFilaments = true
+  }
+
+  openFilaments () {
+    this.filamentsFocusLane = null
+    this.showFilaments = true
+  }
+
   get filteredUnits (): string[] {
     return this.afcUnits
       .filter(unit => !this.afcHiddenUnits.includes(unit))
@@ -195,10 +236,21 @@ export default class AfcLaneCards extends Mixins(StateMixin, AfcMixin) {
     return []
   }
 
+  laneSpoolColor (lane?: Klipper.AfcLaneState | null): string | undefined {
+    if (lane?.spool_id == null) return undefined
+    const spool = this.$typedGetters['spoolman/getSpoolById'](lane.spool_id)
+    return spool?.filament?.colors?.[0]
+  }
+
   laneColor (name: string): string {
     const lane = this.getAfcLaneObject(name)
-    if (lane?.td1_color && this.afc?.td1_present && this.afcShowTd1Color) return `#${lane.td1_color}`
-    return lane?.color || '#808080'
+    return afcResolveLaneColor({
+      color: lane?.color,
+      td1Color: lane?.td1_color,
+      td1Present: this.afc?.td1_present === true,
+      showTd1: this.afcShowTd1Color,
+      spoolColor: this.laneSpoolColor(lane),
+    })
   }
 
   /*
@@ -241,8 +293,13 @@ export default class AfcLaneCards extends Mixins(StateMixin, AfcMixin) {
 
   get loadedColor (): string {
     const lane = this.loadedLane
-    if (lane?.td1_color && this.afc?.td1_present && this.afcShowTd1Color) return `#${lane.td1_color}`
-    return lane?.color || '#808080'
+    return afcResolveLaneColor({
+      color: lane?.color,
+      td1Color: lane?.td1_color,
+      td1Present: this.afc?.td1_present === true,
+      showTd1: this.afcShowTd1Color,
+      spoolColor: this.laneSpoolColor(lane),
+    })
   }
 
   get canAct (): boolean {
@@ -258,9 +315,18 @@ export default class AfcLaneCards extends Mixins(StateMixin, AfcMixin) {
     this.sendGcode(`TOOL_UNLOAD LANE=${encodeGcodeParamValue(this.loadedLane.name)}`)
   }
 
-  ejectLoaded () {
-    if (!this.canAct || !this.loadedLane) return
-    this.sendGcode(`LANE_UNLOAD LANE=${encodeGcodeParamValue(this.loadedLane.name)}`)
+  async ejectLoaded () {
+    const lane = this.loadedLane
+    if (!this.canAct || !lane) return
+
+    const name = lane.name
+    const confirmed = await this.$confirm(
+      this.$t('app.afc.LaneCard.eject_confirm', { name: this.$filters.prettyCase(name) }).toString(),
+      { title: this.$tc('app.general.label.confirm'), color: 'card-heading', icon: '$warning' }
+    )
+    if (!confirmed) return
+
+    this.sendGcode(`LANE_UNLOAD LANE=${encodeGcodeParamValue(name)}`)
   }
 }
 </script>
@@ -268,6 +334,12 @@ export default class AfcLaneCards extends Mixins(StateMixin, AfcMixin) {
 <style scoped>
 .afc-lane-cards-wrapper {
     width: 100%;
+}
+
+.afc-lane-cards-toolbar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
 }
 
 .lane-cards-unit-header {

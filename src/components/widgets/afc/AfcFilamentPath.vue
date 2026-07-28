@@ -103,20 +103,23 @@ export default class AfcFilamentPath extends Mixins(StateMixin, AfcMixin) {
   }
 
   get frontierColor (): string {
-    const lane = this.displayLane
-    if (lane?.td1_color && this.afc?.td1_present && this.afcShowTd1Color) return `#${lane.td1_color}`
-    if (lane?.color) return lane.color
-    return '#2e9d4f'
+    // Stable accent for readability; filament colour is shown on the lane fill.
+    const primary = this.$vuetify.theme.currentTheme.primary
+    return typeof primary === 'string' ? primary : '#2e9d4f'
   }
 
   get hasBuffer (): boolean {
     return this.displayLane?.buffer != null
   }
 
+  get bufferState (): Klipper.AfcBufferStatus | undefined {
+    const lane = this.displayLane
+    if (!lane?.buffer) return undefined
+    return lane.buffer_status ?? this.getAfcBufferObject(lane.buffer)?.state
+  }
+
   get bufferCaption (): string | undefined {
-    if (!this.isLoaded) return undefined
-    const status = this.loadedLane?.buffer_status ?? this.afcCurrentBuffer?.state
-    switch (status) {
+    switch (this.bufferState) {
       case 'Advancing':
         return this.$t('app.afc.Path.compressing').toString()
       case 'Trailing':

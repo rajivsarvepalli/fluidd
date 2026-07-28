@@ -144,3 +144,81 @@ export const computeAfcPathReached = (input: AfcPathInput): boolean[] => {
 export const afcPathLevel = (reached: boolean[]): number => {
   return reached.lastIndexOf(true) + 1
 }
+
+export interface AfcLaneColorInput {
+  color: string | null | undefined
+  td1Color?: string | null
+  td1Present: boolean
+  showTd1: boolean
+  spoolColor?: string | null
+}
+
+const DEFAULT_LANE_COLOR = '#808080'
+
+/**
+ * Resolve a lane's display colour: the TD-1 scanned colour when present and
+ * enabled, otherwise the lane's own colour, then the assigned Spoolman spool's
+ * colour (AFC leaves the lane colour unset when Spoolman was unreachable at
+ * Klipper startup), falling back to a neutral grey.
+ */
+export const afcResolveLaneColor = (input: AfcLaneColorInput): string => {
+  if (input.td1Present && input.td1Color && input.showTd1) {
+    return `#${input.td1Color}`
+  }
+  return input.color || input.spoolColor || DEFAULT_LANE_COLOR
+}
+
+/**
+ * The colours for a lane's fill — the Spoolman multi-colour set when it has more
+ * than one, otherwise the single resolved colour.
+ */
+export const afcLaneColors = (resolvedColor: string, spoolColors?: readonly string[] | null): string[] => {
+  if (spoolColors && spoolColors.length > 1) return [...spoolColors]
+  return [resolvedColor]
+}
+
+/**
+ * CSS background for a spool fill: a vertical gradient for multi-colour spools,
+ * otherwise a solid colour.
+ */
+export const afcFillBackground = (colors: string[]): string => {
+  return colors.length > 1
+    ? `linear-gradient(to top, ${colors.join(', ')})`
+    : colors[0]
+}
+
+/**
+ * Format a lane's tool mapping into a badge, guarding against empty/NONE values.
+ */
+export const afcToolBadge = (map: string | string[] | null | undefined): string | null => {
+  const tools = (Array.isArray(map) ? map : [map])
+    .filter((tool): tool is string => typeof tool === 'string')
+    .map(tool => tool.trim())
+    .filter(tool => tool.length > 0 && tool.toUpperCase() !== 'NONE')
+
+  return tools.length > 0
+    ? tools.map(tool => tool.toUpperCase()).join(' ')
+    : null
+}
+
+export interface AfcLaneAssignState {
+  name: string
+  editable: boolean
+  hasSpool: boolean
+}
+
+/**
+ * The next lane (after `current`, in order) that can take a spool but has none
+ * assigned yet — used to auto-advance through unassigned lanes during setup.
+ * Returns null when there is no such lane ahead.
+ */
+export const nextAssignableLane = (lanes: AfcLaneAssignState[], current: string): string | null => {
+  const index = lanes.findIndex(lane => lane.name === current)
+  if (index === -1) return null
+
+  for (let i = index + 1; i < lanes.length; i++) {
+    if (lanes[i].editable && !lanes[i].hasSpool) return lanes[i].name
+  }
+
+  return null
+}

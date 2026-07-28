@@ -50,7 +50,7 @@
     </div>
 
     <div
-      v-if="toolBadge || backupText"
+      v-if="toolBadge || backupText || isLowFilament"
       class="lane-card-tags"
     >
       <span
@@ -63,6 +63,15 @@
       >
         <v-icon x-small>$afcIconInfinity</v-icon>{{ backupText }}
       </span>
+      <v-icon
+        v-if="isLowFilament"
+        x-small
+        color="warning"
+        class="lane-card-low"
+        :title="$t('app.afc.LaneCard.low_filament').toString()"
+      >
+        $warning
+      </v-icon>
     </div>
 
     <!-- Vertical spool bar -->
@@ -83,8 +92,15 @@
         >
           {{ percent }}%
         </div>
+        <div
+          v-else-if="showInfo"
+          class="lane-card-bar-pct lane-card-bar-pct--unknown"
+          :title="$t('app.afc.LaneCard.unknown_weight').toString()"
+        >
+          ?
+        </div>
         <v-icon
-          v-else-if="!showInfo"
+          v-else
           class="lane-card-bar-empty-icon"
         >
           $close
@@ -126,10 +142,6 @@
       </div>
     </div>
 
-    <afc-unit-lane-filament-dialog
-      v-model="showFilamentDialog"
-      :name="name"
-    />
     <afc-unit-lane-infinite-dialog
       v-model="showInfiniteDialog"
       :name="name"
@@ -138,15 +150,22 @@
 </template>
 
 <script lang="ts">
-import { Component, Mixins, Prop, Watch } from 'vue-property-decorator'
+import { Component, Mixins, Prop } from 'vue-property-decorator'
 import { TinyColor } from '@ctrl/tinycolor'
 import StateMixin from '@/mixins/state'
 import BrowserMixin from '@/mixins/browser'
 import AfcMixin from '@/mixins/afc'
 import { encodeGcodeParamValue } from '@/util/gcode-helpers'
-import { getAfcLaneStatus, computeSpoolPercent, type AfcLaneStatusKey } from '@/util/afc-helpers'
-import type { Spool, SpoolSelectionDialogState } from '@/store/spoolman/types'
-import AfcUnitLaneFilamentDialog from '@/components/widgets/afc/dialogs/AfcUnitLaneFilamentDialog.vue'
+import {
+  getAfcLaneStatus,
+  computeSpoolPercent,
+  afcResolveLaneColor,
+  afcLaneColors,
+  afcFillBackground,
+  afcToolBadge,
+  type AfcLaneStatusKey
+} from '@/util/afc-helpers'
+import type { Spool } from '@/store/spoolman/types'
 import AfcUnitLaneInfiniteDialog from '@/components/widgets/afc/dialogs/AfcUnitLaneInfiniteDialog.vue'
 
 type MenuAction =
@@ -162,15 +181,13 @@ type MenuItem = {
 }
 
 @Component({
-  components: { AfcUnitLaneFilamentDialog, AfcUnitLaneInfiniteDialog },
+  components: { AfcUnitLaneInfiniteDialog },
 })
 export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMixin) {
   @Prop({ type: String, required: true })
   readonly name!: string
 
-  showFilamentDialog = false
   showInfiniteDialog = false
-  spoolmanSelection = false
 
   get lane (): Klipper.AfcLaneState | undefined {
     return this.getAfcLaneObject(this.name)
@@ -216,10 +233,7 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
   }
 
   get toolBadge (): string | null {
-    const map = this.lane?.map
-    if (map == null || map.length === 0) return null
-    const tools = Array.isArray(map) ? map : [map]
-    return tools.map(t => t.toUpperCase()).join(' ')
+    return afcToolBadge(this.lane?.map)
   }
 
   get backupText (): string | null {
@@ -242,26 +256,24 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
   }
 
   get color (): string {
-    if (this.afc?.td1_present && this.lane?.td1_color && this.afcShowTd1Color) {
-      return `#${this.lane.td1_color}`
-    }
-    return this.lane?.color || '#808080'
+    return afcResolveLaneColor({
+      color: this.lane?.color,
+      td1Color: this.lane?.td1_color,
+      td1Present: this.afc?.td1_present === true,
+      showTd1: this.afcShowTd1Color,
+      spoolColor: this.spool?.filament?.colors?.[0],
+    })
   }
 
   /*
    * Multi-color support (Spoolman multi_color_hexes / colors)
    */
   get colors (): string[] {
-    const spoolColors = this.spool?.filament?.colors
-    if (spoolColors && spoolColors.length > 1) return spoolColors
-    return [this.color]
+    return afcLaneColors(this.color, this.spool?.filament?.colors)
   }
 
   get fillBackground (): string {
-    if (this.colors.length > 1) {
-      return `linear-gradient(to top, ${this.colors.join(', ')})`
-    }
-    return this.color
+    return afcFillBackground(this.colors)
   }
 
   get material (): string {
@@ -288,6 +300,12 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
 
   get percent (): number {
     return computeSpoolPercent(this.remainingWeight, this.fullWeight)
+  }
+
+  get isLowFilament (): boolean {
+    return this.showInfo &&
+      this.remainingWeight != null &&
+      this.remainingWeight <= 50
   }
 
   get statusKey (): AfcLaneStatusKey {
@@ -415,34 +433,11 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
         this.sendGcode(`${item.action.command} LANE=${encodeGcodeParamValue(this.name)}`)
         break
       case 'open-filament':
-        this.openFilamentEdit()
+        this.$emit('edit-filament', this.name)
         break
       case 'open-backup':
         this.showInfiniteDialog = true
         break
-    }
-  }
-
-  openFilamentEdit () {
-    if (this.afcExistsSpoolman) {
-      this.spoolmanSelection = true
-      this.$typedCommit('spoolman/setDialogState', {
-        show: true,
-        spoolSelectionOnly: true,
-        selectedSpoolId: this.spoolId,
-      })
-      return
-    }
-    this.showFilamentDialog = true
-  }
-
-  @Watch('$typedState.spoolman.dialog')
-  onSpoolmanChanged (dialog: SpoolSelectionDialogState) {
-    if (!dialog.show && this.spoolmanSelection) {
-      this.spoolmanSelection = false
-      if (dialog.selectedSpoolId !== this.spoolId) {
-        this.sendGcode(`SET_SPOOL_ID LANE=${encodeGcodeParamValue(this.name)} SPOOL_ID=${dialog.selectedSpoolId ?? ''}`)
-      }
     }
   }
 }
@@ -523,6 +518,12 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
     opacity: 0.8;
 }
 
+.lane-card-low {
+    align-self: center;
+    cursor: help;
+    opacity: 0.9;
+}
+
 .lane-card-bar-wrap {
     display: flex;
     justify-content: center;
@@ -562,6 +563,12 @@ export default class AfcLaneCard extends Mixins(StateMixin, BrowserMixin, AfcMix
     z-index: 1;
     font-size: 0.74rem;
     font-weight: 700;
+}
+
+.lane-card-bar-pct--unknown {
+    font-size: 1.1rem;
+    opacity: 0.7;
+    cursor: help;
 }
 
 .lane-card-bar-empty-icon {
